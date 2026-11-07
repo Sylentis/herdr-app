@@ -280,3 +280,33 @@ test("no reconciliation without a rendered sidebar", () => {
   h.flush();
   expect(h.order()).toEqual(["main", "topic"]);
 });
+
+test("spaces with an active agent rise above idle ones, stable, worktrees stay under their checkout, held 20s", () => {
+  const h = orderedHarness(["idle1", "a", "main", "idle2", "busy"]);
+  h.git("main", "repo", false);
+  h.git("a", "repo", true);
+  const set = (id: string, status: string | null) => { (h.snapshot.find(s => s.id === id) as any).status = status; };
+  set("busy", "working");
+  set("a", "blocked"); // active worktree pulls its whole checkout group up
+  expect(h.rows().map((r: any) => r.w.id)).toEqual(["main", "a", "busy", "idle1", "idle2"]);
+  // agent goes idle: held for ACTIVE_HOLD, then drops below
+  set("busy", "idle");
+  expect(h.rows().map((r: any) => r.w.id)).toEqual(["main", "a", "busy", "idle1", "idle2"]);
+  const real = Date.now;
+  Date.now = () => real() + 25000;
+  try {
+    h.flush();
+    set("a", "idle");
+    set("idle2", "working");
+    expect(h.rows().map((r: any) => r.w.id)).toEqual(["idle2", "main", "a", "busy", "idle1"]);
+  } finally { Date.now = real; }
+});
+
+test("sort by activity can be switched off", () => {
+  const h = orderedHarness(["idle", "busy"]);
+  (h.snapshot.find(s => s.id === "busy") as any).status = "working";
+  expect(h.rows().map((r: any) => r.w.id)).toEqual(["busy", "idle"]);
+  h.storage.set("spaces.sortByActivity", "0");
+  h.view.lastActive = {};
+  expect(h.rows().map((r: any) => r.w.id)).toEqual(["idle", "busy"]);
+});
