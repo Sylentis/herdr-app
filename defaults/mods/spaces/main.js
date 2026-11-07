@@ -33,6 +33,8 @@ const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
+// How long a space keeps counting as active after its agent last was (see ordered()).
+const ACTIVE_HOLD = 20000;
 
 // What a stored color name looks like on an avatar (the same in every mod
 // that draws space avatars): one strong color per hue, light and dark alike.
@@ -274,6 +276,22 @@ export default class Spaces extends View {
       placed.add(r.g.repo);
       const kids = list.filter((k) => nested(k) && k.g.repo === r.g.repo);
       kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─" }));
+    }
+    // Spaces with an agent at work or needing you rise above idle ones. Stable:
+    // each half keeps its order, worktrees stay under their checkout. A space
+    // stays "active" for HOLD ms after its agent's last active status, so the
+    // list doesn't jump between an agent's steps. Off: localStorage spaces.sortByActivity = "0".
+    if (localStorage.getItem("spaces.sortByActivity") !== "0") {
+      const now = Date.now();
+      this.lastActive ??= {};
+      for (const w of sp) if (w.status && w.status !== "idle") this.lastActive[w.id] = now;
+      const live = (w) => now - (this.lastActive[w.id] ?? -Infinity) < ACTIVE_HOLD;
+      const groups = [];
+      for (const r of out) (r.tree ? groups[groups.length - 1] : groups[groups.push([]) - 1]).push(r);
+      const hot = groups.filter((g) => g.some((r) => live(r.w)));
+      const cold = groups.filter((g) => !g.some((r) => live(r.w)));
+      out.length = 0;
+      out.push(...hot.flat(), ...cold.flat());
     }
     // Simulate the batch so later indexes include earlier moves. An attempted
     // write can lose a sync conflict: allow the echo to settle before retrying.
